@@ -52,3 +52,35 @@ lexflow-database/
 ├── Runner/
 │   └── LexFlow.Database.Runner/     (DbUp console app)
 └── README.md
+```
+
+## Runner
+
+`Runner/LexFlow.Database.Runner` is a .NET 9 console app (DbUp + Npgsql) that discovers
+every `.sql` file under `Scripts/`, orders them by full relative path (so `00_.../001_...sql`
+always runs before `01_.../001_...sql`), and applies them inside a DbUp transactional
+journal. Applied scripts are tracked in a `public.dbup_schema_versions` table, so rerunning
+against an already-migrated database is a no-op for scripts already applied.
+
+Connection string resolution (first match wins):
+1. `LEXFLOW_DB_CONNECTION` environment variable
+2. `ConnectionStrings:LexFlowDatabase` in `Runner/LexFlow.Database.Runner/appsettings.json`
+
+```bash
+# from the repo root
+export LEXFLOW_DB_CONNECTION="Host=localhost;Port=5432;Database=lexflow;Username=lexflow;Password=lexflow"
+
+# print the execution order without applying anything
+dotnet run --project Runner/LexFlow.Database.Runner -- --dry-run
+
+# apply pending scripts
+dotnet run --project Runner/LexFlow.Database.Runner
+```
+
+## CI
+
+`.github/workflows/db-migrate.yml`:
+- On every PR: spins up a throwaway Postgres 16 service container and applies the full
+  schema from empty — a PR cannot merge if the schema doesn't apply cleanly.
+- On merge to `main`: applies the schema to staging using the `LEXFLOW_DB_CONNECTION`
+  secret configured on the `staging` GitHub environment.

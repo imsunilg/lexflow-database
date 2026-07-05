@@ -1,0 +1,80 @@
+name: DB Migrate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "9.0.x"
+  RUNNER_PROJECT: Runner/LexFlow.Database.Runner
+
+jobs:
+  # Every PR must apply cleanly against a brand-new Postgres 16 instance.
+  verify-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lexflow
+          POSTGRES_PASSWORD: lexflow
+          POSTGRES_DB: lexflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U lexflow"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      LEXFLOW_DB_CONNECTION: "Host=localhost;Port=5432;Database=lexflow;Username=lexflow;Password=lexflow"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.RUNNER_PROJECT }}
+
+      - name: Build
+        run: dotnet build ${{ env.RUNNER_PROJECT }} --no-restore --configuration Release
+
+      - name: Print execution order (dry run)
+        run: dotnet run --project ${{ env.RUNNER_PROJECT }} --no-build --configuration Release -- --dry-run
+
+      - name: Apply schema to empty database
+        run: dotnet run --project ${{ env.RUNNER_PROJECT }} --no-build --configuration Release
+
+  # On merge to main, apply the (idempotent) schema to staging.
+  deploy-staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      LEXFLOW_DB_CONNECTION: ${{ secrets.STAGING_DB_CONNECTION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.RUNNER_PROJECT }}
+
+      - name: Build
+        run: dotnet build ${{ env.RUNNER_PROJECT }} --no-restore --configuration Release
+
+      - name: Print execution order (dry run)
+        run: dotnet run --project ${{ env.RUNNER_PROJECT }} --no-build --configuration Release -- --dry-run
+
+      - name: Apply schema to staging
+        run: dotnet run --project ${{ env.RUNNER_PROJECT }} --no-build --configuration Release
