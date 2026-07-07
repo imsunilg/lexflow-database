@@ -1,0 +1,81 @@
+name: Database Migrate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  apply-clean:
+    name: Apply schema to empty PostgreSQL 16 (PR gate)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lexflow
+          POSTGRES_PASSWORD: lexflow
+          POSTGRES_DB: lexflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lexflow -d lexflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore
+        run: dotnet restore Runner/LexFlow.Database.Runner
+
+      - name: Build
+        run: dotnet build Runner/LexFlow.Database.Runner --no-restore --configuration Release
+
+      - name: Print planned execution order (dry run)
+        run: dotnet run --project Runner/LexFlow.Database.Runner --no-build --configuration Release -- --dry-run
+
+      - name: Apply schema to empty database
+        env:
+          LEXFLOW_DB_CONNECTION: "Host=localhost;Port=5432;Database=lexflow;Username=lexflow;Password=lexflow"
+        run: dotnet run --project Runner/LexFlow.Database.Runner --no-build --configuration Release
+
+      - name: Re-run to prove idempotency
+        env:
+          LEXFLOW_DB_CONNECTION: "Host=localhost;Port=5432;Database=lexflow;Username=lexflow;Password=lexflow"
+        run: dotnet run --project Runner/LexFlow.Database.Runner --no-build --configuration Release
+
+  deploy-staging:
+    name: Apply schema to staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore
+        run: dotnet restore Runner/LexFlow.Database.Runner
+
+      - name: Build
+        run: dotnet build Runner/LexFlow.Database.Runner --no-restore --configuration Release
+
+      - name: Apply schema to staging
+        env:
+          LEXFLOW_DB_CONNECTION: ${{ secrets.LEXFLOW_STAGING_DB_CONNECTION }}
+        run: dotnet run --project Runner/LexFlow.Database.Runner --no-build --configuration Release
