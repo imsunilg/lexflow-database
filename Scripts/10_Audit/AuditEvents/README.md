@@ -12,4 +12,4 @@ Expected files (per the numbering rule in `LexFlow_Build_Playbook.md` §1.1):
 | `004_Triggers.sql` | object-specific triggers (e.g. `updated_at` touch, immutability guards) |
 | `005_Seed.sql` | *(only if this is a lookup/reference table)* static seed rows |
 
-This folder is currently empty — table SQL has not been written yet.
+Built (DB-10): 001_Table (PARTITION BY RANGE(at)), 002_Indexes, 003_Insert_Only_Trigger (role grant + trigger defense in depth), 004_Functions (audit.fn_ensure_partition), 005_Partitions (bootstrap).

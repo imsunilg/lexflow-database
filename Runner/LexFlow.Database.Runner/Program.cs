@@ -1,13 +1,16 @@
 using DbUp;
 using Microsoft.Extensions.Configuration;
+using Npgsql;
+using Testcontainers.PostgreSql;
 
 namespace LexFlow.Database.Runner;
 
 internal static class Program
 {
-    private static int Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         var dryRun = args.Contains("--dry-run");
+        var verifyOnly = args.Contains("--verify-only");
         var scriptsPathArg = GetArgValue(args, "--scripts-path");
 
         var configuration = new ConfigurationBuilder()
@@ -44,6 +47,11 @@ internal static class Program
             return 0;
         }
 
+        if (verifyOnly)
+        {
+            return await RunVerifyOnlyAsync(scriptsRoot, scripts);
+        }
+
         var connectionString = ResolveConnectionString(configuration);
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -69,6 +77,80 @@ internal static class Program
         }
 
         Console.WriteLine($"Success — {scripts.Count} script(s) considered, database is up to date.");
+        return 0;
+    }
+
+    /// <summary>
+    /// --verify-only: applies every script to a throwaway Testcontainers-managed PostgreSQL
+    /// 16 instance (no external DB needed — this is why it's safe to run on any dev machine
+    /// or CI runner with Docker, not just against a pre-provisioned database), then runs the
+    /// three assertion checks from Verification.cs. Requires Docker to be available; the
+    /// container is always torn down on exit, success or failure.
+    /// </summary>
+    private static async Task<int> RunVerifyOnlyAsync(string scriptsRoot, List<DbUp.Engine.SqlScript> scripts)
+    {
+        Console.WriteLine("Starting a throwaway PostgreSQL 16 Testcontainer for --verify-only...");
+
+        await using var container = new PostgreSqlBuilder()
+            .WithImage("postgres:16")
+            .WithDatabase("lexflow_verify")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await container.StartAsync();
+        var connectionString = container.GetConnectionString();
+        Console.WriteLine("Container started. Applying all scripts...");
+
+        var upgrader = DeployChanges.To
+            .PostgresqlDatabase(connectionString)
+            .WithScripts(scripts)
+            .JournalToPostgresqlTable("public", "dbup_schema_versions")
+            .LogToConsole()
+            .Build();
+
+        var result = upgrader.PerformUpgrade();
+        if (!result.Successful)
+        {
+            Console.Error.WriteLine("Migration failed against the verify container:");
+            Console.Error.WriteLine(result.Error);
+            return 1;
+        }
+
+        Console.WriteLine($"Migrations applied ({scripts.Count} scripts). Running verification assertions...");
+
+        var failures = new List<string>();
+
+        await using (var conn = new NpgsqlConnection(connectionString))
+        {
+            await conn.OpenAsync();
+
+            Console.WriteLine("[1/3] Checking tenant_id + audit columns on every table (except whitelisted)...");
+            failures.AddRange(await Verification.CheckAuditColumnsAsync(conn));
+
+            Console.WriteLine("[2/3] Cross-checking every table referenced by 15_RLS_Policies actually has RLS enabled...");
+            var rlsTables = Verification.ScanRlsTables(scriptsRoot);
+            Console.WriteLine($"      Found {rlsTables.Count} table reference(s) across 15_RLS_Policies/*.sql.");
+            failures.AddRange(await Verification.CheckRlsEnabledAsync(conn, rlsTables));
+        }
+
+        Console.WriteLine("[3/3] Verifying trust_ledger_entries and audit_events reject UPDATE/DELETE...");
+        failures.AddRange(await Verification.CheckAppendOnlyTablesAsync(connectionString));
+
+        if (failures.Count > 0)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"VERIFY FAILED — {failures.Count} issue(s):");
+            foreach (var failure in failures)
+            {
+                Console.Error.WriteLine($"  - {failure}");
+            }
+
+            return 1;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("VERIFY PASSED — all checks green.");
         return 0;
     }
 

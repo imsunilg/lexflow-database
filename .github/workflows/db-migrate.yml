@@ -54,6 +54,32 @@ jobs:
           LEXFLOW_DB_CONNECTION: "Host=localhost;Port=5432;Database=lexflow;Username=lexflow;Password=lexflow"
         run: dotnet run --project Runner/LexFlow.Database.Runner --no-build --configuration Release
 
+  verify-only:
+    name: Verify schema invariants (required PR check)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # No `services:` postgres here — --verify-only manages its own throwaway PostgreSQL 16
+    # container via Testcontainers, using the Docker daemon already present on
+    # GitHub-hosted ubuntu-latest runners. This job is independent of apply-clean above.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore
+        run: dotnet restore Runner/LexFlow.Database.Runner
+
+      - name: Build
+        run: dotnet build Runner/LexFlow.Database.Runner --no-restore --configuration Release
+
+      - name: Apply all scripts to a throwaway Testcontainers Postgres + run assertions
+        run: dotnet run --project Runner/LexFlow.Database.Runner --no-build --configuration Release -- --verify-only
+
   deploy-staging:
     name: Apply schema to staging
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
