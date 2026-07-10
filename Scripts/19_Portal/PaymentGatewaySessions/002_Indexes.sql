@@ -1,0 +1,2 @@
+CREATE INDEX ix_payment_gateway_sessions_tenant_invoice ON portal.payment_gateway_sessions (tenant_id, invoice_id);
+CREATE UNIQUE INDEX ux_payment_gateway_sessions_idempotency_key ON portal.payment_gateway_sessions (idempotency_key);

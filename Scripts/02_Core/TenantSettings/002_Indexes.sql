@@ -1,0 +1,4 @@
+-- PK (tenant_id, key) already covers per-tenant per-section lookup; no
+-- additional index needed beyond the settings-audit access pattern, which
+-- reads audit.audit_events (entity_type = 'core.tenant_settings') rather
+-- than this table directly (§30, §Module 15 "GET /settings/audit?section=").
