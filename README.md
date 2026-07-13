@@ -52,3 +52,16 @@ lexflow-database/
 ├── Runner/
 │   └── LexFlow.Database.Runner/     (DbUp console app)
 └── README.md
+
+## Local dev (all three repos together)
+
+This repo doesn't run standalone in the full local stack — the Runner just
+applies these scripts to a Postgres instance the other repos also need.
+The canonical bring-up (Postgres → this repo's Runner → API+Workers → both
+Angular dev servers, health-check gated) lives in
+`lexflow-api/docker-compose.full.yml` — see
+`lexflow-api/docs/local-dev.md`. This repo is assumed to be checked out as
+a sibling of `lexflow-api` and `lexflow-web`.
+
+See `COMPATIBILITY.md` for which schema version pairs with which API/web
+version.

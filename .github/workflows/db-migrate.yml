@@ -80,6 +80,16 @@ jobs:
       - name: Apply all scripts to a throwaway Testcontainers Postgres + run assertions
         run: dotnet run --project Runner/LexFlow.Database.Runner --no-build --configuration Release -- --verify-only
 
+  # Keeps staging current for changes made in *this* repo. lexflow-api's own
+  # .github/workflows/release.yml also runs the Runner against
+  # LEXFLOW_STAGING_DB_CONNECTION as a pre-deploy step (PRD §38) before
+  # every API/web staging deploy — intentionally redundant with this job
+  # (DbUp is idempotent, journaled in public.dbup_schema_versions), since
+  # that guarantees the schema is current for the exact commit being
+  # released regardless of when this repo's pipeline last ran. See
+  # lexflow-api/docs/staging-release.md for the full release-gate chain
+  # (staging deploy -> D-18 Playwright -> C-15 staging smoke -> blue-green
+  # production).
   deploy-staging:
     name: Apply schema to staging
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
